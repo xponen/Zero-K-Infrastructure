@@ -581,12 +581,14 @@ namespace LobbyClient
             try {
                 if (!process.WaitForExit(2000)) process.Kill();
             } catch {}
-
+            process.Dispose();
             process = null;
             talker.Close();
+            talker.Dispose();
             talker = null;
             Thread.Sleep(1000);
             var logText = LogLines.ToString();
+            LogLines = null;
             ParseInfolog(logText, isCrash);
 
             try {

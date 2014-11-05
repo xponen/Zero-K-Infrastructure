@@ -24,6 +24,7 @@ namespace PlasmaShared
         public string UnitSyncDirectory { get; private set; }
         public string WritableDirectory { get; private set; }
         public event EventHandler SpringVersionChanged;
+        private string tempDataDir;
 
         public SpringPaths(string springPath, string writableFolderOverride = null)
         {
@@ -161,8 +162,32 @@ namespace PlasmaShared
             if (ov != springVersion  && SpringVersionChanged != null) SpringVersionChanged(this, EventArgs.Empty);
         }
 
+        public string SetTemporaryDatadir(string shortPath)
+        {
+            if (DataDirectories.Count == 0) // no datadir directory set yet, can't set temp
+                return null;
 
+            //tempDataDir = Utils.MakePath(DataDirectories.First(), shortPath);
+            tempDataDir = Utils.MakePath(WritableDirectory, shortPath);
+            if (!Directory.Exists(tempDataDir)) Directory.CreateDirectory(tempDataDir);
+            Environment.SetEnvironmentVariable("SPRING_DATADIR", tempDataDir, EnvironmentVariableTarget.Process);
+            Environment.SetEnvironmentVariable("SPRING_WRITEDIR", tempDataDir, EnvironmentVariableTarget.Process);
+            Environment.SetEnvironmentVariable("SPRING_ISOLATED", tempDataDir, EnvironmentVariableTarget.Process);
+            System.Diagnostics.Trace.TraceInformation("SpringPaths: Temporary datadir mode: {0}", tempDataDir);
+            return tempDataDir;
+        }
 
+        public void CancelTemporaryDatadir()
+        {
+            if (DataDirectories.Count == 0) // no datadir directory set yet, can't undo
+                return;
+
+            var ddenv = string.Join(Environment.OSVersion.Platform == PlatformID.Unix ? ":" : ";", DataDirectories.Distinct());
+            Environment.SetEnvironmentVariable("SPRING_DATADIR", ddenv, EnvironmentVariableTarget.Process);
+            Environment.SetEnvironmentVariable("SPRING_WRITEDIR", WritableDirectory, EnvironmentVariableTarget.Process);
+            Environment.SetEnvironmentVariable("SPRING_ISOLATED", WritableDirectory, EnvironmentVariableTarget.Process);
+            System.Diagnostics.Trace.TraceInformation("SpringPaths: Temporary datadir mode cancelled");
+        }
 
         void CreateFolder(string path)
         {

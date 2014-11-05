@@ -10,13 +10,26 @@ using System.Threading;
 using MonoTorrent.Common;
 using PlasmaShared.ContentService;
 using PlasmaShared.UnitSyncLib;
+using System.Runtime.InteropServices;
 
 #endregion
 
 namespace PlasmaShared
 {
+    class SpringScannerTool
+    {
+        [DllImport("kernel32.dll")]
+        static extern public bool CreateSymbolicLink(string lpSymlinkFileName, string lpTargetFileName, int dwFlags); //Window Vista and above only!
+        public enum SymbolicLink
+        {
+            File = 0,
+            Directory = 1
+        }
+    }
+
     public class SpringScanner: IDisposable
     {
+
         /// <summary>
         /// auto save cache every X seconds if dirty
         /// </summary>
@@ -106,9 +119,15 @@ namespace PlasmaShared
         public UnitSync unitSync;
 
         /// <summary>
-        /// whether an attempt to load unitsync was performed
+        /// whether an attempt to load unitsync was performed.
         /// </summary>
         string unitSyncAttemptedFolder;
+
+        /// <summary>
+        /// which folder unitsync is currently specifically configured to read from 
+        /// (datadir is temporarily set to this path to isolate unitsync from other file as attempt to optimize its scanning speed)
+        /// </summary>
+        string fileAttemptedFolder; 
 
         /// <summary>
         /// number of unitsync operations since the last unitsync initialization
@@ -346,11 +365,6 @@ namespace PlasmaShared
 
         void GetResourceData(WorkItem work)
         {
-            if (springPaths.SpringVersion == null)
-            {
-                AddWork(work.CacheItem, WorkItem.OperationType.ReAskServer, DateTime.Now.AddSeconds(RescheduleServerQuery), false);
-                return;
-            }
 
             ResourceData result = null;
             try
@@ -360,19 +374,20 @@ namespace PlasmaShared
             catch (Exception ex)
             {
                 Trace.TraceError("Error getting resource data: {0}", ex);
-                AddWork(work.CacheItem, WorkItem.OperationType.ReAskServer, DateTime.Now.AddSeconds(RescheduleServerQuery), false);
-                return;
+                //AddWork(work.CacheItem, WorkItem.OperationType.ReAskServer, DateTime.Now.AddSeconds(RescheduleServerQuery), false);
+                //return;
             }
 
             if (result == null)
             {
-                if (UseUnitSync) {
-                    Trace.WriteLine(String.Format("No server resource data for {0}, queing upload", work.CacheItem.ShortPath));
-                    AddWork(work.CacheItem, WorkItem.OperationType.UnitSync, DateTime.Now, false);
-                }
-                else {
+                if (!UseUnitSync || springPaths.SpringVersion == null)
+                {
                     Trace.WriteLine(String.Format("No server resource data for {0}, asking later", work.CacheItem.ShortPath));
                     AddWork(work.CacheItem, WorkItem.OperationType.ReAskServer, DateTime.Now.AddSeconds(UnitsyncMissingReaskQuery), false);
+                }
+                else {
+                    Trace.WriteLine(String.Format("No server resource data for {0}, queing upload", work.CacheItem.ShortPath));
+                    AddWork(work.CacheItem, WorkItem.OperationType.UnitSync, DateTime.Now, false);
                 }
                 return;
             }
@@ -386,7 +401,8 @@ namespace PlasmaShared
 
         static string GetShortPath(string folder, string file)
         {
-            return string.Format("{0}/{1}", folder, Path.GetFileName(file));
+            //return string.Format("{0}/{1}", folder, Path.GetFileName(file));
+            return PlasmaShared.Utils.MakePath(folder, Path.GetFileName(file));
         }
 
         IResourceInfo GetUnitSyncData(string filename)
@@ -598,7 +614,7 @@ namespace PlasmaShared
         void PerformUnitSyncOperation(WorkItem workItem)
         {
             Trace.TraceInformation("PerformUnitSyncOperation");
-            VerifyUnitSync();
+            VerifyUnitSync(workItem.CacheItem);
 
             if (unitSync == null)
             {
@@ -606,8 +622,11 @@ namespace PlasmaShared
                 CacheMarkFailedUnitSync(workItem.CacheItem.ShortPath);
                 return;
             }
-
+            Stopwatch stopWatch = new Stopwatch(); stopWatch.Start();
             var info = GetUnitSyncData(workItem.CacheItem.FileName);
+            // Format and display the TimeSpan value.
+            stopWatch.Stop(); TimeSpan ts = stopWatch.Elapsed; string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}", ts.Hours, ts.Minutes, ts.Seconds, ts.Milliseconds / 10);
+            Trace.TraceInformation("1 Runtime {0}", elapsedTime);
             UnInitUnitsync();
 
             if (info != null)
@@ -723,18 +742,47 @@ namespace PlasmaShared
                     Trace.TraceWarning("Error disposing unitsync: {0}", ex);
                 }
             }
+
+            springPaths.CancelTemporaryDatadir();
+            if (fileAttemptedFolder != null) //remove symbolic link 
+                ;
         } 
 
         /// <summary>VerifyUnitSync() check whether unitSync should be initialized and perform unitSync initialization.
         /// </summary> 
-        public void VerifyUnitSync()
+        public void VerifyUnitSync(CacheItem cacheItem=null)
         {
+            UseUnitSync = (UseUnitSync && springPaths.UnitSyncDirectory!=null);
+            if (!UseUnitSync)
+            {
+                Trace.TraceWarning("Error initializing unitsync: Unitsync directory path is not set yet");
+                return;
+            }
+
+            fileAttemptedFolder = null;
+            if (cacheItem != null)
+            {
+                unitSyncAttemptedFolder = null; //force re-init
+                if (cacheItem.Folder == "packages")
+                    springPaths.SetTemporaryDatadir("packages");
+                else
+                {
+                    var folder = springPaths.SetTemporaryDatadir("cache\\SD\\UnitSyncTemp");
+                    fileAttemptedFolder = GetShortPath(folder, cacheItem.FileName);
+                    var originalFile = PlasmaShared.Utils.MakePath(springPaths.WritableDirectory,cacheItem.Folder,cacheItem.FileName);
+                    //create symbolic link
+                    SpringScannerTool.CreateSymbolicLink(fileAttemptedFolder, originalFile, 0);
+                    System.Diagnostics.Trace.TraceInformation("fileAttemptedFolder: {0}", fileAttemptedFolder);
+                    System.Diagnostics.Trace.TraceInformation("originalFile: {0}", originalFile);
+                }
+            }
+ 
             if (unitSyncReInitCounter >= UnitSyncReInitFrequency)
             {
                 unitSyncAttemptedFolder = null;
                 unitSyncReInitCounter = 0;
             }
-            if (unitSyncAttemptedFolder != springPaths.UnitSyncDirectory || unitSync==null)
+            if (unitSyncAttemptedFolder != springPaths.UnitSyncDirectory || unitSync == null)
             {
                 if (unitSync != null)
                 {

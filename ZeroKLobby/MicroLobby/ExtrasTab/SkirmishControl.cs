@@ -234,7 +234,7 @@ namespace ZeroKLobby.MicroLobby.ExtrasTab
                     string engineFolder = ZkData.Utils.MakePath(Program.SpringPaths.WritableDirectory, "engine");
                     engineList = System.IO.Directory.EnumerateDirectories(engineFolder, "*").ToList<string>();
                     for (int i = 0; i < engineList.Count; i++)
-                        engineList[i] = SkirmishControlTool.GetFolderName(engineList[i]);
+                        engineList[i] = SkirmishControlTool.GetFolderOrFileName(engineList[i]);
 
                     engineList = SkirmishControlTool.SortListByVersionName(engineList);
 
@@ -446,7 +446,7 @@ namespace ZeroKLobby.MicroLobby.ExtrasTab
 
             var newList = new List<PlayerListItem>();
             newList.Add(myItem);
-            List<PlayerListItem> playerListItems = new List<PlayerListItem>();
+            var playerListItems = new List<PlayerListItem>();
 
             if (!myItem.UserBattleStatus.IsSpectator || Bots.Count > 0) playerListItems.Add(myItem);
             var existingTeams = playerListItems.GroupBy(i => i.UserBattleStatus.AllyNumber).Select(team => team.Key).ToList();

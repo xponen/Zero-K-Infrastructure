@@ -167,20 +167,27 @@ namespace ZeroKLobby.MicroLobby
 		}
 
 
+		private bool previousEmpty;
 		protected override void OnMouseMove(MouseEventArgs e)
 		{
 			base.OnMouseMove(e);
 			var cursorPoint = new Point(e.X, e.Y);
-			if (cursorPoint == previousLocation) return;
+			
+			if (cursorPoint == previousLocation) return; //same position?
 			previousLocation = cursorPoint;
-
-			var hoverIndex = IndexFromPoint(cursorPoint);
-			if (previousHoverIndex == hoverIndex) return;
+			
+			var hoverIndex = IndexFromPoint(cursorPoint); //note: this won't return value exceeding base.Items.Count -1
+			bool isOnEmpty = (hoverIndex == base.Items.Count-1 && !GetItemRectangle(hoverIndex).Contains(cursorPoint));		
+			
+			if (previousHoverIndex == hoverIndex && !isOnEmpty) return; //same index (inside the list)?
 			previousHoverIndex = hoverIndex;
+			
+			if (previousEmpty && isOnEmpty) return; //still is outside the list?
+			previousEmpty = isOnEmpty;
 
-			if (hoverIndex < 0 || hoverIndex >= base.Items.Count || !GetItemRectangle(hoverIndex).Contains(cursorPoint))
+			if (hoverIndex < 0 || isOnEmpty)
 			{
-				HoverItem = null;
+				HoverItem = null; //null = outside the list
 				Program.ToolTip.SetUser(this, null);
 			}
 			else
